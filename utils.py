@@ -31,12 +31,24 @@ def save_model(model,optimizer,epoch):
             'optimizer_state_dict': optimizer.state_dict(),
             }, "model.pth")
   
-def save_image(genr_image,path):
-  image=genr_image
-  image_np = image.to('cpu').detach().numpy() if isinstance(image, torch.Tensor) else image
-  image_np = (image_np * 255).astype(np.uint8)
-  pil_image = Image.fromarray(image_np)
-  pil_image.save(path)
+def save_image(genr_image,path,h,w,model,usemodel=False):
+  if model==False:
+      genr_image=genr_image.view(h,w,3)
+      genr_image=genr_image*0.5+0.5
+      image=genr_image
+      image_np = image.to('cpu').detach().numpy() 
+      image_np = (image_np * 255).astype(np.uint8)
+      pil_image = Image.fromarray(image_np)
+      pil_image.save(path)
+  else:
+      genr_image=model(1)
+      genr_image=genr_image.view(h,w,3)
+      genr_image=genr_image*0.5+0.5
+      image=genr_image
+      image_np = image.to('cpu').detach().numpy() 
+      image_np = (image_np * 255).astype(np.uint8)
+      pil_image = Image.fromarray(image_np)
+      pil_image.save(path)
 
 def imagefrom_hash(hash,h,w):
   with torch.no_grad():
@@ -57,6 +69,7 @@ def get_svd_and_num_eigenvectors_above_threshold(matrix, threshold=0.5,Device='c
   print(torch.dist(new_matrix,matrix.to(Device)))
 
   return new_matrix,num_eigenvectors,S
+  
 
 def residual_display(genr_image,new_img):
   diff_img=torch.abs(genr_image-new_img.permute(1,2,0))
