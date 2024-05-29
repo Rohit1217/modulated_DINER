@@ -1,4 +1,4 @@
-import torch
+import torch as torch 
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
@@ -61,8 +61,11 @@ class SineLayer(nn.Module):
                 self.linear.weight.uniform_(-np.sqrt(6 / self.in_features) / self.omega_0,
                                              np.sqrt(6 / self.in_features) / self.omega_0)
 
-    def forward(self, input):
-        out = torch.sin(self.omega_0 * self.linear(input))
+    def forward(self, input,modulation=False):
+        if modulation:
+           out=self.linear(input)
+        else:
+           out = torch.sin(self.omega_0 * self.linear(input))
         return out
     
 
@@ -112,7 +115,7 @@ class hashMLP(nn.Module):
 class DINERMlp(nn.Module):
     def __init__(self, input_size, hidden_size, output_size,h,w):
         super(DINERMlp, self).__init__()
-        h_size=1
+        h_size=2
         #self.register_parameter('hash', nn.Parameter((torch.randn((1200*1200,2))).to(Device),requires_grad=True))
         self.hash = nn.parameter.Parameter(1e-4 * (torch.rand((h*w,h_size))*2 -1),requires_grad = True)
         self.fc1 = nn.Linear(h_size, hidden_size ,bias=True)
@@ -149,6 +152,9 @@ class DinerSiren(nn.Module):
       self.fc3 = SineLayer(hidden_size, hidden_size,bias=True)
       #self.fc4 = SineLayer(hidden_size, hidden_size,bias=True)
       self.fc5 = nn.Linear(hidden_size, output_size,bias=True)
+      with torch.no_grad():
+          self.fc5.weight.uniform_(-np.sqrt(6 / 64) /30,
+                                              np.sqrt(6 / 64) /30)
 
     def forward(self,x,hash=True):
         hash3=self.hash
@@ -198,6 +204,327 @@ class MLP(nn.Module):
 class hMLP(nn.Module):
     def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
         super(hMLP, self).__init__()
+        self.d=d
+        self.hash01 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash02 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash011 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash022 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash11 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash12 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash21 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash22 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash31 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash32 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.fc1 = nn.Linear(input_size, hidden_size ,bias=True)
+        self.fc2 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc3 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc5 = nn.Linear(hidden_size, output_size,bias=True)
+
+    def forward(self,x,hash=True):
+        hash1=torch.matmul(self.hash01,self.hash02)
+        hash01=torch.matmul(self.hash011,self.hash022)
+        hash2=torch.matmul(self.hash11,self.hash12)
+        hash3=torch.matmul(self.hash21,self.hash22)
+        hash4=torch.matmul(self.hash31,self.hash32)
+        #hash5=torch.matmul(self.hash41,self.hash42)
+        h,w=hash1.shape
+        hash1=hash1.view(h*w,1)
+        hash01=hash01.view(h*w,1)
+        hash2=hash2.view(h*w,1)
+        hash3=hash3.view(h*w,1)
+        hash4=hash4.view(h*w,1)
+        #hash5=hash5.view(h*w,1)
+        if hash:
+          x=torch.cat((hash1,hash01),dim=1)
+        else:
+          x=x
+        x = F.relu(self.fc1(x)+ hash2)
+        x = F.relu(self.fc2(x)+ hash3)
+        x = F.relu(self.fc3(x)+ hash4)
+        x = self.fc5(x)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+    
+class modfcMLP(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w):
+        super(MLP, self).__init__()
+        self.hash1 = nn.parameter.Parameter(1e-4 * (torch.rand((h,15))*2 -1),requires_grad = True)
+        self.hash2 = nn.parameter.Parameter(1e-4 * (torch.rand((15,w))*2 -1),requires_grad = True)
+        self.fc1 = nn.Linear(input_size-1, hidden_size ,bias=True)
+        self.fc2 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc3 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc4 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc5 = nn.Linear(hidden_size, output_size,bias=True)
+
+    def forward(self,x,hash=True):
+        hash3=torch.matmul(self.hash1,self.hash2)
+        h,w=hash3.shape
+        hash3=hash3.view(h*w,1)
+        if hash:
+          #x=torch.cat((self.hash[:,0].unsqueeze(1),self.hash[:,0].unsqueeze(1).detach()),dim=1)
+          x=hash3
+        else:
+          #x=torch.cat((x.unsqueeze(1),x.unsqueeze(1)),dim=1)
+          x=x
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        x = F.relu(self.fc4(x))
+        x = self.fc5(x)
+        #x = torch.clamp(x,-1.0,1.0)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+
+class newhMLP(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
+        super(newhMLP, self).__init__()
+        self.d=d
+        self.hash01 = nn.parameter.Parameter (1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash02 = nn.parameter.Parameter (1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash11 = nn.parameter.Parameter (1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash12 = nn.parameter.Parameter (1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash21 = nn.parameter.Parameter (1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash22 = nn.parameter.Parameter (1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash31 = nn.parameter.Parameter (1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash32 = nn.parameter.Parameter (1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash011 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash021 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash111 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash121 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash211 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash221 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash311 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash321 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.fc1 = nn.Linear(input_size, hidden_size ,bias=True)
+        self.fc2 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc3 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc5 = nn.Linear(hidden_size, output_size,bias=True)
+        self.fc6 = nn.Linear(input_size,hidden_size)
+        self.fc7 = nn.Linear(input_size,hidden_size)
+        self.fc8 = nn.Linear(input_size,hidden_size)
+
+    def forward(self,x,hash=True):
+        hash1=torch.matmul(self.hash01,self.hash02)
+        hash2=torch.matmul(self.hash11,self.hash12)
+        hash3=torch.matmul(self.hash21,self.hash22)
+        hash4=torch.matmul(self.hash31,self.hash32)
+        hash11=torch.matmul(self.hash011,self.hash021)
+        hash21=torch.matmul(self.hash111,self.hash121)
+        hash31=torch.matmul(self.hash211,self.hash221)
+        hash41=torch.matmul(self.hash311,self.hash321)
+        #hash5=torch.matmul(self.hash41,self.hash42)
+        h,w=hash1.shape
+        hash1=hash1.view(h*w,1)
+        hash2=hash2.view(h*w,1)
+        hash3=hash3.view(h*w,1)
+        hash4=hash4.view(h*w,1)
+        hash11=hash11.view(h*w,1)
+        hash21=hash21.view(h*w,1)
+        hash31=hash31.view(h*w,1)
+        hash41=hash41.view(h*w,1)
+        hash1=torch.cat((hash1,hash11),dim=1)
+        hash2=torch.cat((hash2,hash21),dim=1)
+        hash3=torch.cat((hash3,hash31),dim=1)
+        hash4=torch.cat((hash4,hash41),dim=1)
+        #print(hash1.shape,hash2.shape,hash3.shape,hash4.shape)
+
+        #hash5=hash5.view(h*w,1)
+        if hash:
+          x=hash1
+        else:
+          x=x
+
+        x = F.relu(self.fc1(x)+ self.fc6(hash2))
+        x = F.relu(self.fc2(x)+ self.fc7(hash3))
+        x = F.relu(self.fc3(x)+ self.fc8(hash4))
+        x = self.fc5(x)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+
+class newhMLPSiren(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
+        super(newhMLPSiren, self).__init__()
+        self.d=d
+        self.hash01 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash02 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash11 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash12 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash21 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash22 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash31 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash32 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash011 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash021 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash111 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash121 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash211 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash221 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash311 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash321 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.fc1 = SineLayer(input_size, hidden_size ,bias=True,is_first=True)
+        self.fc2 = SineLayer(hidden_size, hidden_size,bias=True)
+        self.fc3 = SineLayer(hidden_size, hidden_size,bias=True)
+        self.fc5 = nn.Linear(hidden_size, 1,bias=True)
+        with torch.no_grad():
+          self.fc5.weight.uniform_(-np.sqrt(6 / 64) /30,
+                                              np.sqrt(6 / 64) /30)
+        self.fc6 = nn.Linear(input_size,hidden_size)
+        self.fc7 = nn.Linear(input_size,hidden_size)
+        self.fc8 = nn.Linear(input_size,hidden_size)
+
+    def forward(self,x,hash=True):
+        hash1=torch.matmul(self.hash01,self.hash02)
+        hash2=torch.matmul(self.hash11,self.hash12)
+        hash3=torch.matmul(self.hash21,self.hash22)
+        hash4=torch.matmul(self.hash31,self.hash32)
+        hash11=torch.matmul(self.hash011,self.hash021)
+        hash21=torch.matmul(self.hash111,self.hash121)
+        hash31=torch.matmul(self.hash211,self.hash221)
+        hash41=torch.matmul(self.hash311,self.hash321)
+        #hash5=torch.matmul(self.hash41,self.hash42)
+        h,w=hash1.shape
+        hash1=hash1.view(h*w,1)
+        hash2=hash2.view(h*w,1)
+        hash3=hash3.view(h*w,1)
+        hash4=hash4.view(h*w,1)
+        hash11=hash11.view(h*w,1)
+        hash21=hash21.view(h*w,1)
+        hash31=hash31.view(h*w,1)
+        hash41=hash41.view(h*w,1)
+        hash1=torch.cat((hash1,hash11),dim=1)
+        hash2=torch.cat((hash2,hash21),dim=1)
+        hash3=torch.cat((hash3,hash31),dim=1)
+        hash4=torch.cat((hash4,hash41),dim=1)
+        #print(hash1.shape,hash2.shape,hash3.shape,hash4.shape)
+
+        #hash5=hash5.view(h*w,1)
+        if hash:
+          x=hash1
+        else:
+          x=x
+
+        x = torch.sin(30*(self.fc1(x,modulation=True)+ self.fc6(hash2)))
+        x = torch.sin(30*(self.fc2(x,modulation=True)+ self.fc7(hash3)))
+        x = torch.sin(30*(self.fc3(x,modulation=True)+ self.fc8(hash4)))
+        x = self.fc5(x)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+
+class nomodMLP(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
+        super(nomodMLP, self).__init__()
+        self.d=d
+        self.hash01 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash02 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash11 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash12 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.fc1 = nn.Linear(input_size, hidden_size ,bias=True)
+        self.fc2 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc3 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc4 = nn.Linear(hidden_size, output_size,bias=True)
+
+    def forward(self,x,hash=True):
+        hash1=torch.matmul(self.hash01,self.hash02)
+        hash2=torch.matmul(self.hash11,self.hash12)
+        h,w=hash1.shape
+        hash1=hash1.view(h*w,1)
+        hash2=hash2.view(h*w,1)
+        if hash:
+          x=torch.concat((hash1,hash2),dim=1)
+        else:
+          x=x
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        x = self.fc4(x)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+
+
+class nomodSirenMLP(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
+        super(nomodSirenMLP, self).__init__()
+        self.d=d
+        self.hash01 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash02 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash11 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash12 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.fc1 = SineLayer(input_size, hidden_size ,bias=True,is_first=True)
+        self.fc2 = SineLayer(hidden_size, hidden_size,bias=True)
+        self.fc3 = SineLayer(hidden_size, hidden_size,bias=True)
+        self.fc4 = nn.Linear(hidden_size, output_size,bias=True)
+        with torch.no_grad():
+          self.fc4.weight.uniform_(-np.sqrt(6 / 64) /30,
+                                              np.sqrt(6 / 64) /30)
+
+    def forward(self,x,hash=True):
+        hash1=torch.matmul(self.hash01,self.hash02)
+        hash2=torch.matmul(self.hash11,self.hash12)
+        h,w=hash1.shape
+        hash1=hash1.view(h*w,1)
+        hash2=hash2.view(h*w,1)
+        if hash:
+          x=torch.concat((hash1,hash2),dim=1)
+        else:
+          x=x
+        x = self.fc1(x)
+        x = self.fc2(x)
+        x = self.fc3(x)
+        x = self.fc4(x)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+
+
+class di2Mlp(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
+        super(di2Mlp, self).__init__()
+        self.d=d
+        self.hash01 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash02 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash11 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash12 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash21 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash22 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash31 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash32 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+        self.hash41 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
+        self.hash42 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
+
+        self.fc1 = nn.Linear(input_size, hidden_size ,bias=True)
+        self.fc2 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc3 = nn.Linear(hidden_size, hidden_size,bias=True)
+        self.fc5 = nn.Linear(hidden_size, output_size,bias=True)
+
+    def forward(self,x,hash=True):
+        hash1=torch.matmul(self.hash01,self.hash02)
+        hash2=torch.matmul(self.hash11,self.hash12)
+        hash3=torch.matmul(self.hash21,self.hash22)
+        hash4=torch.matmul(self.hash31,self.hash32)
+        hash5=torch.matmul(self.hash41,self.hash42)
+
+        h,w=hash1.shape
+        hash1=hash1.view(h*w,1)
+        hash2=hash2.view(h*w,1)
+        hash3=hash3.view(h*w,1)
+        hash4=hash4.view(h*w,1)
+        hash5=hash5.view(h*w,1)
+
+        if hash:
+          x=torch.concat((hash1,hash5),dim=1)
+        else:
+          x=x
+        x = F.relu(self.fc1(x))+ hash2
+        x = F.relu(self.fc2(x))+ hash3
+        x = F.relu(self.fc3(x))+ hash4
+        x = self.fc5(x)
+        x = torch.clamp(x, min = -1.0,max = 1.0)
+        return x
+
+   
+
+class nhMLP(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size,h,w,d=20):
+        super(nhMLP, self).__init__()
         #self.register_parameter('hash', nn.Parameter((torch.randn((1200*1200,2))).to(Device),requires_grad=True))
         #self.hash = nn.parameter.Parameter(1e-4 * (torch.rand((h*w,2))*2 -1),requires_grad = True)
         self.d=d
@@ -209,17 +536,10 @@ class hMLP(nn.Module):
         self.hash22 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
         self.hash31 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
         self.hash32 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
-        #self.hash41 = nn.parameter.Parameter(1e-4 * (torch.rand((h,d))*2 -1),requires_grad = True)
-        #self.hash42 = nn.parameter.Parameter(1e-4 * (torch.rand((d,w))*2 -1),requires_grad = True)
         self.fc1 = nn.Linear(input_size-1, hidden_size ,bias=True)
         self.fc2 = nn.Linear(hidden_size, hidden_size,bias=True)
         self.fc3 = nn.Linear(hidden_size, hidden_size,bias=True)
-        #self.fc4 = nn.Linear(hidden_size, hidden_size,bias=True)
         self.fc5 = nn.Linear(hidden_size, output_size,bias=True)
-        #self.fc6 = SineLayer(input_size-1, hidden_size,bias=True)
-        #self.fc7 = SineLayer(input_size-1, hidden_size,bias=True)
-        #self.fc8 = SineLayer(input_size-1, hidden_size,bias=True)
-        #self.fc9 = SineLayer(input_size-1, hidden_size,bias=True)
 
     def forward(self,x,hash=True):
         hash1=torch.matmul(self.hash01,self.hash02)
@@ -232,23 +552,18 @@ class hMLP(nn.Module):
         hash2=hash2.view(h*w,1)
         hash3=hash3.view(h*w,1)
         hash4=hash4.view(h*w,1)
-        #hash5=hash5.view(h*w,1)
         if hash:
-          #x=torch.cat((self.hash[:,0].unsqueeze(1),self.hash[:,0].unsqueeze(1).detach()),dim=1)
           x=hash1
         else:
-          #x=torch.cat((x.unsqueeze(1),x.unsqueeze(1)),dim=1)
           x=x
 
-        x = F.relu(self.fc1(x))+ hash2
-        x = F.relu(self.fc2(x))+ hash3
-        x = F.relu(self.fc3(x))+ hash4
-        #x = F.relu(self.fc4(x))+ hash5
+        x = F.relu(self.fc1(x)+ hash2)
+        x = F.relu(self.fc2(x)+ hash3)
+        x = F.relu(self.fc3(x)+ hash4)
         x = self.fc5(x)
         #x = torch.clamp(x,-1.0,1.0)
         x = torch.clamp(x, min = -1.0,max = 1.0)
         return x
-
 
 
 class hsMLP(nn.Module):
